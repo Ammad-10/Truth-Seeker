@@ -1,0 +1,58 @@
+# Environment and secrets
+.env
+*.env
+Website/.env
+Website/supabase/functions/.env
+truthseeker/deployment/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+truthseeker/deployment/.venv/
+
+# Node / frontend
+node_modules/
+Website/node_modules/
+dist/
+Website/dist/
+dist-ssr/
+*.local
+
+# Local databases and generated runtime files
+*.db
+*.sqlite
+*.sqlite3
+
+# Model artifacts and large ML outputs
+truthseeker/model_output/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.tar.gz
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Local Codex marker
+.codex
