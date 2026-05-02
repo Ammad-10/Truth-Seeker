@@ -81,12 +81,13 @@ _base_model_path_raw  = os.getenv("TRUTHSEEKER_BASE_MODEL_PATH") or os.getenv("B
 if _base_model_path_raw and not Path(_base_model_path_raw).is_absolute():
     os.environ["TRUTHSEEKER_BASE_MODEL_PATH"] = str((_deployment_dir / _base_model_path_raw).resolve())
 GOOGLE_FACT_CHECK_KEY = os.getenv("GOOGLE_FACT_CHECK_KEY")
-GEMINI_API_KEY        = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY          = os.getenv("GROQ_API_KEY")
+GROQ_MODEL            = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 DB_PATH               = os.getenv("DB_PATH", str(Path(__file__).resolve().parent.parent / "truthseeker.db"))
-INVERT_MODEL_PROBS    = os.getenv("TRUTHSEEKER_INVERT_MODEL_PROBS", "true").strip().lower() in ("1", "true", "yes", "on")
+INVERT_MODEL_PROBS    = os.getenv("TRUTHSEEKER_INVERT_MODEL_PROBS", "false").strip().lower() in ("1", "true", "yes", "on")
 
-if not GEMINI_API_KEY:
-    print("⚠️ Warning: GEMINI_API_KEY missing from environment (.env). Gemini reasoning will be neutral.")
+if not GROQ_API_KEY:
+    print("⚠️ Warning: GROQ_API_KEY missing from environment (.env). Groq reasoning will be neutral.")
 
 # Load model once at startup
 print(f"Loading model from {MODEL_PATH}…")
@@ -352,7 +353,7 @@ Respond in this exact JSON format:
 NOTE: The 'verdict' MUST be exactly one of: REAL, FAKE, UNVERIFIED, or NEEDS REVIEW. The reasoning should be list of strings.
 """
 
-def build_gemini_prompt(claim, topic, model_score, model_label, news_score, factcheck_result):
+def build_groq_prompt(claim, topic, model_score, model_label, news_score, factcheck_result):
     return BASE_PROMPT.format(
         claim=claim,
         topic=topic,
@@ -363,10 +364,10 @@ def build_gemini_prompt(claim, topic, model_score, model_label, news_score, fact
         topic_prompt=TOPIC_PROMPTS[topic]
     )
 
-def synthesize_gemini(text, user_topic, ml_label, ml_conf, news_ev, fact_check):
-    """Use Gemini to synthesize evidence with topic detection. Returns {score, reasoning, verdict, topic}."""
-    if not GEMINI_API_KEY or (isinstance(GEMINI_API_KEY, str) and GEMINI_API_KEY.strip().lower() in ("", "your_key", "your-gemini-api-key")):
-        return {"score": 50, "confidence": 50, "reasoning": "Gemini API key is missing or not set. Add a valid GEMINI_API_KEY to your .env file.", "verdict": "UNVERIFIED", "topic": "general"}
+def synthesize_groq(text, user_topic, ml_label, ml_conf, news_ev, fact_check):
+    """Use Groq to synthesize evidence with topic detection. Returns {score, reasoning, verdict, topic}."""
+    if not GROQ_API_KEY or (isinstance(GROQ_API_KEY, str) and GROQ_API_KEY.strip().lower() in ("", "your_key", "your-groq-api-key")):
+        return {"score": 50, "confidence": 50, "reasoning": "Groq API key is missing or not set. Add a valid GROQ_API_KEY to your .env file.", "verdict": "UNVERIFIED", "topic": "general"}
     
     # 1. Topic resolution
     if not user_topic or user_topic.lower() == "auto":
@@ -377,7 +378,7 @@ def synthesize_gemini(text, user_topic, ml_label, ml_conf, news_ev, fact_check):
             topic = "general"
             
     try:
-        prompt = build_gemini_prompt(
+        prompt = build_groq_prompt(
             claim=text,
             topic=topic,
             model_score=ml_conf,
@@ -387,30 +388,30 @@ def synthesize_gemini(text, user_topic, ml_label, ml_conf, news_ev, fact_check):
         )
 
         response = http_requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
             json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.3,
-                    "maxOutputTokens": 400,
-                    "response_mime_type": "application/json",
-                },
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are TruthSeeker's fact-checking reasoning layer. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 400,
+                "response_format": {"type": "json_object"},
             },
             timeout=20,
         )
         response.raise_for_status()
         data = response.json()
-        response_text = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "{}")
-        )
+        response_text = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
         
         try:
             parsed = json.loads(response_text)
-            gemini_conf = max(0, min(100, int(parsed.get("confidence", 50))))
+            groq_conf = max(0, min(100, int(parsed.get("confidence", 50))))
             verdict = str(parsed.get("verdict", "UNVERIFIED")).upper()
             if verdict not in ["REAL", "FAKE", "NEEDS REVIEW"]:
                 verdict = "UNVERIFIED"
@@ -423,23 +424,23 @@ def synthesize_gemini(text, user_topic, ml_label, ml_conf, news_ev, fact_check):
 
             # Map (verdict, confidence) -> credibility score (0-100, higher = more credible)
             if verdict == "REAL":
-                gemini_score = gemini_conf
+                groq_score = groq_conf
             elif verdict == "FAKE":
-                gemini_score = 100 - gemini_conf
+                groq_score = 100 - groq_conf
             else:
-                gemini_score = 50
+                groq_score = 50
 
-            return {"score": gemini_score, "confidence": gemini_conf, "reasoning": reasoning, "verdict": verdict, "topic": topic}
+            return {"score": groq_score, "confidence": groq_conf, "reasoning": reasoning, "verdict": verdict, "topic": topic}
         except json.JSONDecodeError:
-            return {"score": 50, "confidence": 50, "reasoning": "Failed to parse Gemini JSON response.", "verdict": "UNVERIFIED", "topic": topic}
+            return {"score": 50, "confidence": 50, "reasoning": "Failed to parse Groq JSON response.", "verdict": "UNVERIFIED", "topic": topic}
 
     except Exception as e:
         err_str = str(e).lower()
-        if "401" in err_str or "403" in err_str or "api_key_invalid" in err_str or "invalid api key" in err_str:
-            return {"score": 50, "confidence": 50, "reasoning": "Gemini API key is invalid or not allowed. Set a valid GEMINI_API_KEY in your .env file.", "verdict": "UNVERIFIED", "topic": topic}
-        if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str:
-            return {"score": 50, "confidence": 50, "reasoning": "Gemini quota is exhausted or unavailable for this API key/model. Check Google AI Studio rate limits or enable quota for GEMINI_API_KEY.", "verdict": "UNVERIFIED", "topic": topic}
-        return {"score": 50, "confidence": 50, "reasoning": "Error computing reasoning via Gemini. Please try again later.", "verdict": "UNVERIFIED", "topic": topic}
+        if "401" in err_str or "403" in err_str or "invalid api key" in err_str or "unauthorized" in err_str:
+            return {"score": 50, "confidence": 50, "reasoning": "Groq API key is invalid or not allowed. Set a valid GROQ_API_KEY in your .env file.", "verdict": "UNVERIFIED", "topic": topic}
+        if "429" in err_str or "rate_limit" in err_str or "quota" in err_str:
+            return {"score": 50, "confidence": 50, "reasoning": "Groq quota or rate limit is exhausted for this API key/model. Check Groq Console limits or update GROQ_MODEL.", "verdict": "UNVERIFIED", "topic": topic}
+        return {"score": 50, "confidence": 50, "reasoning": "Error computing reasoning via Groq. Please try again later.", "verdict": "UNVERIFIED", "topic": topic}
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -508,7 +509,7 @@ def verify():
 
     # ─── External evidence APIs disabled for now ──────────────
     # GDELT and Google Fact Check are parked temporarily. Keep neutral values
-    # so existing UI/database fields remain stable while scoring is model+Gemini.
+    # so existing UI/database fields remain stable while scoring is model+Groq.
     # gdelt_result = api_check_gdelt(text_in)
     gdelt_result = {"score": 50, "sources": []}
     news_api_score = gdelt_result["score"]
@@ -523,23 +524,23 @@ def verify():
     }
     google_fc_score = fact_check["score"]
 
-    # ─── Gemini Reasoning + Score (50% weight) ─────────────────
-    gemini_result = synthesize_gemini(text_in, user_topic, model_label, model_fake_pct, news_api_score, fact_check)
-    gemini_score = gemini_result["score"]
-    gemini_confidence = gemini_result.get("confidence", 50)
-    gemini_reasoning = gemini_result["reasoning"]
-    gemini_verdict = gemini_result["verdict"]
-    topic_used = gemini_result["topic"]
+    # ─── Groq Reasoning + Score (50% weight) ───────────────────
+    groq_result = synthesize_groq(text_in, user_topic, model_label, model_fake_pct, news_api_score, fact_check)
+    groq_score = groq_result["score"]
+    groq_confidence = groq_result.get("confidence", 50)
+    groq_reasoning = groq_result["reasoning"]
+    groq_verdict = groq_result["verdict"]
+    topic_used = groq_result["topic"]
 
     # ─── Fixed Weights While External APIs Are Disabled ───────
-    weights = {'model': 0.50, 'news': 0.00, 'factcheck': 0.00, 'gemini': 0.50}
+    weights = {'model': 0.50, 'news': 0.00, 'factcheck': 0.00, 'groq': 0.50}
 
     # ─── Final Credibility Score ──────────────────────────────
     cred_score = round(
         model_score    * weights['model'] +
         news_api_score * weights['news'] +
         google_fc_score * weights['factcheck'] +
-        gemini_score     * weights['gemini']
+        groq_score      * weights['groq']
     )
     cred_score = max(0, min(100, cred_score))
 
@@ -567,20 +568,22 @@ def verify():
         # Individual sub-scores
         "model_score":       model_score,
         "model_fake_pct":    model_fake_pct,
+        "model_raw_fake_pct": int(round(float(nlp.get("raw_fake_prob", model_fake_prob)) * 100)),
+        "model_calibration": nlp.get("calibration", []),
         "model_output_inverted": INVERT_MODEL_PROBS,
         "news_api_score":    news_api_score,
         "google_fc_score":   google_fc_score,
-        "gemini_score":      gemini_score,
-        "gemini_verdict":    gemini_verdict,
-        "gemini_confidence": gemini_confidence,
-        "groq_score":        gemini_score,
-        "groq_verdict":      gemini_verdict,
-        "groq_confidence":   gemini_confidence,
+        "gemini_score":      groq_score,
+        "gemini_verdict":    groq_verdict,
+        "gemini_confidence": groq_confidence,
+        "groq_score":        groq_score,
+        "groq_verdict":      groq_verdict,
+        "groq_confidence":   groq_confidence,
         # Details
         "fact_check":        fact_check,
         "fact_check_summary": fact_check.get("summary", ""),
-        "gemini_reasoning":  gemini_reasoning,
-        "groq_reasoning":    gemini_reasoning,
+        "gemini_reasoning":  groq_reasoning,
+        "groq_reasoning":    groq_reasoning,
         "gdelt_sources":     gdelt_sources,
         "linguistic_flags":  flags,
         "input_type":        input_type,
@@ -599,8 +602,8 @@ def verify():
                 model_score, news_api_score, google_fc_score, groq_score, groq_reasoning)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (input_type, text_in[:500], model_score, news_api_score,
-             cred_score, verdict, gemini_reasoning[:2000], ",".join(flags), topic_used,
-             model_score, news_api_score, google_fc_score, gemini_score, gemini_reasoning[:5000] if gemini_reasoning else None)
+             cred_score, verdict, groq_reasoning[:2000], ",".join(flags), topic_used,
+             model_score, news_api_score, google_fc_score, groq_score, groq_reasoning[:5000] if groq_reasoning else None)
         )
         db.commit()
     except Exception:

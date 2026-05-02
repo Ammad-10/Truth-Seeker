@@ -29,12 +29,20 @@ dist-ssr/
 *.sqlite3
 
 # Model artifacts and large ML outputs
-truthseeker/model_output/
 *.safetensors
 *.bin
 *.pt
 *.pth
 *.tar.gz
+truthseeker/model_output/*
+truthseeker/model_output/base_models/
+
+# Keep the small trained TruthSeeker adapter/model package in the repo.
+!truthseeker/model_output/sagemaker_clean_2026_04_24/
+!truthseeker/model_output/sagemaker_clean_2026_04_24/model.tar.gz
+!truthseeker/model_output/sagemaker_clean_2026_04_24/extracted/
+!truthseeker/model_output/sagemaker_clean_2026_04_24/extracted/final_model/
+!truthseeker/model_output/sagemaker_clean_2026_04_24/extracted/final_model/**
 
 # Logs
 logs/

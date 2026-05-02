@@ -1,0 +1,16 @@
+{
+  "model": "distilbert-base-uncased",
+  "lora": true,
+  "lora_rank": 8,
+  "test_accuracy": 0.9799483518152818,
+  "test_f1": 0.9799535777654087,
+  "label2id": {
+    "FAKE": 0,
+    "REAL": 1
+  },
+  "id2label": {
+    "0": "FAKE",
+    "1": "REAL"
+  },
+  "max_length": 512
+}

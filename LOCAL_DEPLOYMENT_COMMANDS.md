@@ -9,7 +9,7 @@ This local setup runs:
 - Flask model API at `http://localhost:5000`
 - Vite website at `http://localhost:5173`
 - Supabase for auth and verification history
-- Gemini for the optional reasoning layer
+- Groq for the optional reasoning layer
 
 The website calls the Flask API through:
 
@@ -78,14 +78,15 @@ The Flask API is configured in `truthseeker/deployment/.env` to use:
 ```text
 MODEL_PATH=../model_output/sagemaker_clean_2026_04_24/extracted/final_model
 TRUTHSEEKER_BASE_MODEL_PATH=../model_output/base_models/distilbert-base-uncased
-TRUTHSEEKER_INVERT_MODEL_PROBS=true
-GEMINI_API_KEY=your-gemini-api-key
+TRUTHSEEKER_INVERT_MODEL_PROBS=false
+GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=llama-3.3-70b-versatile
 GOOGLE_FACT_CHECK_KEY=
 ```
 
 These paths point to:
 
-- the fetched SageMaker LoRA adapter
+- the included trained LoRA adapter
 - the locally downloaded DistilBERT base model
 
 ## Demo Note
@@ -94,4 +95,4 @@ This model is strongest on article-style news text.
 
 For presentation, use full article-like examples. Keep short-claim robustness as documented future work.
 
-Groq is not used in the current local flow. External fact-check APIs are disabled by default, and reasoning should use `GEMINI_API_KEY` only.
+External fact-check APIs are disabled by default, and reasoning uses `GROQ_API_KEY`.

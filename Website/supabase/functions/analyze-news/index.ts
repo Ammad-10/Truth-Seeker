@@ -3,12 +3,12 @@
  * 
  * Core verification pipeline for Truth Seeker (Cloud deployment).
  * 
- * Credibility Score = (Model × 0.50) + (Gemini × 0.50)
+ * Credibility Score = (Model × 0.50) + (Groq × 0.50)
  * 
  * This function:
  * 1. Sends text to the TruthSeeker Flask API for fake/real classification (50%)
  * 2. Keeps external evidence APIs disabled for now
- * 3. Uses Gemini for reasoning synthesis + score (50%)
+ * 3. Uses Groq for reasoning synthesis + score (50%)
  * 4. Saves everything to the verifications table
  * 5. Returns the full analysis result to the client
  */
@@ -209,13 +209,14 @@ Respond in this exact JSON format:
 }
 NOTE: The 'verdict' MUST be exactly one of: REAL, FAKE, UNVERIFIED, or NEEDS REVIEW. The reasoning should be list of strings.`;
 
-// ─── Helper: Gemini Reasoning + Score (50% weight) ────────────────
+// ─── Helper: Groq Reasoning + Score (50% weight) ──────────────────
 
-async function synthesizeGemini(
+async function synthesizeGroq(
   text: string, userTopic: string, mlLabel: string, mlConf: number, newsScore: number, factCheck: { summary: string }
 ): Promise<{ score: number; reasoning: string; verdict: string; topic: string }> {
-  const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
-  if (!GEMINI_KEY) return { score: 50, reasoning: "Gemini API key not configured.", verdict: "UNVERIFIED", topic: "general" };
+  const GROQ_KEY = Deno.env.get("GROQ_API_KEY");
+  const GROQ_MODEL = Deno.env.get("GROQ_MODEL") || "llama-3.3-70b-versatile";
+  if (!GROQ_KEY) return { score: 50, reasoning: "Groq API key not configured.", verdict: "UNVERIFIED", topic: "general" };
 
   let topic = userTopic?.toLowerCase() || "auto";
   if (topic === "auto") {
@@ -234,27 +235,30 @@ async function synthesizeGemini(
     .replace(/{topic_prompt}/g, TOPIC_PROMPTS[topic]);
 
   try {
-    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
+        "Authorization": `Bearer ${GROQ_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 400,
-          response_mime_type: "application/json",
-        },
+        model: GROQ_MODEL,
+        messages: [
+          { role: "system", content: "You are TruthSeeker's fact-checking reasoning layer. Respond only with valid JSON." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+        response_format: { type: "json_object" },
       }),
     });
 
     if (!resp.ok) {
-      throw new Error(`Gemini request failed with status ${resp.status}: ${await resp.text()}`);
+      throw new Error(`Groq request failed with status ${resp.status}: ${await resp.text()}`);
     }
 
     const data = await resp.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const responseText = data.choices?.[0]?.message?.content || "{}";
 
     try {
       const parsed = JSON.parse(responseText);
@@ -270,14 +274,17 @@ async function synthesizeGemini(
       }
       return { score, reasoning, verdict, topic };
     } catch {
-      return { score: 50, reasoning: "Failed to parse Gemini JSON response.", verdict: "UNVERIFIED", topic };
+      return { score: 50, reasoning: "Failed to parse Groq JSON response.", verdict: "UNVERIFIED", topic };
     }
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
-    if (message.includes("429") || message.includes("resource_exhausted") || message.includes("quota")) {
-      return { score: 50, reasoning: "Gemini quota is exhausted or unavailable for this API key/model. Check Google AI Studio rate limits or enable quota for GEMINI_API_KEY.", verdict: "UNVERIFIED", topic };
+    if (message.includes("401") || message.includes("403") || message.includes("unauthorized")) {
+      return { score: 50, reasoning: "Groq API key is invalid or not allowed. Set a valid GROQ_API_KEY.", verdict: "UNVERIFIED", topic };
     }
-    return { score: 50, reasoning: "Error getting Gemini reasoning.", verdict: "UNVERIFIED", topic };
+    if (message.includes("429") || message.includes("rate_limit") || message.includes("quota")) {
+      return { score: 50, reasoning: "Groq quota or rate limit is exhausted for this API key/model. Check Groq Console limits or update GROQ_MODEL.", verdict: "UNVERIFIED", topic };
+    }
+    return { score: 50, reasoning: "Error getting Groq reasoning.", verdict: "UNVERIFIED", topic };
   }
 }
 
@@ -333,20 +340,20 @@ serve(async (req) => {
       url: "",
     };
 
-    // ─── Step 3: Gemini Reasoning + Score (50% weight) ───
-    const geminiResult = await synthesizeGemini(
+    // ─── Step 3: Groq Reasoning + Score (50% weight) ───
+    const groqResult = await synthesizeGroq(
       `${headline || ""} ${text}`.trim(), userTopic,
       classification, modelScore, newsResult.score, factCheckResult
     );
 
     // ─── Step 4: Calculate Credibility Score ───
-    const weights = { model: 0.50, news: 0.00, factcheck: 0.00, gemini: 0.50 };
+    const weights = { model: 0.50, news: 0.00, factcheck: 0.00, groq: 0.50 };
 
     const credibilityScore = Math.max(0, Math.min(100, Math.round(
       modelScore * weights.model +
       newsResult.score * weights.news +
       factCheckResult.score * weights.factcheck +
-      geminiResult.score * weights.gemini
+      groqResult.score * weights.groq
     )));
 
     let verdict: string;
@@ -371,17 +378,17 @@ serve(async (req) => {
           article_text: text.substring(0, 5000),
           credibility_score: credibilityScore,
           verdict,
-          topic: geminiResult.topic,
+          topic: groqResult.topic,
           ai_confidence: modelScore,
-          ai_reasoning: geminiResult.reasoning.substring(0, 2000),
+          ai_reasoning: groqResult.reasoning.substring(0, 2000),
           source_score: newsResult.score,
           source_summary: factCheckResult.summary,
           model_score: modelScore,
           news_api_score: newsResult.score,
           google_fc_score: factCheckResult.score,
-          groq_score: geminiResult.score,
-          groq_reasoning: geminiResult.reasoning.substring(0, 2000),
-          groq_verdict: geminiResult.verdict,
+          groq_score: groqResult.score,
+          groq_reasoning: groqResult.reasoning.substring(0, 2000),
+          groq_verdict: groqResult.verdict,
         });
       }
     }
@@ -395,11 +402,11 @@ serve(async (req) => {
         model_score: modelScore,
         news_api_score: newsResult.score,
         google_fc_score: factCheckResult.score,
-        gemini_score: geminiResult.score,
-        gemini_verdict: geminiResult.verdict,
-        groq_score: geminiResult.score,
-        groq_verdict: geminiResult.verdict,
-        topic: geminiResult.topic,
+        gemini_score: groqResult.score,
+        gemini_verdict: groqResult.verdict,
+        groq_score: groqResult.score,
+        groq_verdict: groqResult.verdict,
+        topic: groqResult.topic,
         news_summary: newsResult.summary,
         gdelt_sources: newsResult.sources,
         fact_check: {
@@ -408,8 +415,8 @@ serve(async (req) => {
           summary: factCheckResult.summary,
           url: factCheckResult.url,
         },
-        gemini_reasoning: geminiResult.reasoning,
-        groq_reasoning: geminiResult.reasoning,
+        gemini_reasoning: groqResult.reasoning,
+        groq_reasoning: groqResult.reasoning,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

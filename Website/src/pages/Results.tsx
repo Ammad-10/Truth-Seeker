@@ -1,6 +1,6 @@
 /**
  * Results Page – Truth Seeker
- * Displays 4-axis credibility breakdown: Model, News API, Google Fact Check, Gemini
+ * Displays 4-axis credibility breakdown: Model, News API, Google Fact Check, Groq
  */
 
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -257,7 +257,7 @@ const Results = () => {
                 <ScoreBreakdownBar label="ML Model" score={modelScore} weight={`${weights.model}%`} delay={0.3} />
                 <ScoreBreakdownBar label="News API" score={newsScore} weight={`${weights.news}%`} delay={0.4} />
                 <ScoreBreakdownBar label="Google Fact Check" score={googleScore} weight={`${weights.factcheck}%`} delay={0.5} />
-                <ScoreBreakdownBar label="Gemini AI" score={geminiScore} weight={`${weights.gemini}%`} delay={0.6} />
+                <ScoreBreakdownBar label="Groq AI" score={geminiScore} weight={`${weights.gemini}%`} delay={0.6} />
               </div>
             </CardContent>
           </Card>
@@ -357,7 +357,7 @@ const Results = () => {
             </motion.div>
           </div>
 
-          {/* Panel 3: Gemini AI Reasoning — full width */}
+          {/* Panel 3: Groq AI Reasoning — full width */}
           <motion.div
             className="mt-6"
             initial={{ opacity: 0, y: 20 }}
@@ -370,7 +370,7 @@ const Results = () => {
                   <Bot className="h-5 w-5 text-primary" />
                 </div>
                 <div className="flex flex-1 flex-wrap items-center gap-2">
-                  <CardTitle className="text-lg">AI Reasoning <span className="text-xs text-muted-foreground font-normal">(Gemini – 30%)</span></CardTitle>
+                  <CardTitle className="text-lg">AI Reasoning <span className="text-xs text-muted-foreground font-normal">(Groq – 30%)</span></CardTitle>
                   <span className={`rounded-full border px-2.5 py-0.5 text-xs font-bold tracking-wide ${getGeminiVerdictColor(geminiVerdict)}`}>
                     {geminiVerdict}
                   </span>

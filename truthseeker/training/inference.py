@@ -94,6 +94,50 @@ class TruthSeekerInference:
         text = re.sub(r"\s+", " ", text).strip().lower()
         return text
 
+    def _calibrate_probs(self, original_text: str, fake_prob: float, real_prob: float) -> tuple[float, float, list]:
+        """
+        The fine-tuned model was trained mostly on article-style text, so raw softmax
+        can be too confident on short claims. Calibrate short/sensational inputs
+        toward review instead of letting them become fake=0 or real=100.
+        """
+        notes = []
+        text = original_text or ""
+        text_lower = text.lower()
+        words = re.findall(r"\b[\w']+\b", text_lower)
+        word_count = len(words)
+
+        if word_count < 120:
+            # Keep some model signal, but reduce extreme confidence on inputs that
+            # are much shorter than the training articles.
+            length_factor = max(0.25, word_count / 120)
+            fake_prob = 0.5 + (fake_prob - 0.5) * length_factor
+            notes.append("SHORT_TEXT_CALIBRATION")
+
+        risk = 0.0
+        if any(w in text_lower for w in ["shocking", "breaking", "urgent", "bombshell"]):
+            risk += 0.10
+        if text.count("!") > 2:
+            risk += 0.10
+        if sum(1 for c in text if c.isupper()) / max(len(text), 1) > 0.30:
+            risk += 0.08
+        if any(p in text_lower for p in [
+            "they don't want you to know",
+            "doctors don't want you to know",
+            "doctors do not want you to know",
+            "mainstream media won't tell",
+            "secret cure",
+            "miracle cure",
+        ]):
+            risk += 0.18
+
+        if risk > 0:
+            fake_prob = max(fake_prob, min(0.85, 0.35 + risk))
+            notes.append("LINGUISTIC_RISK_CALIBRATION")
+
+        fake_prob = max(0.0, min(1.0, fake_prob))
+        real_prob = 1.0 - fake_prob
+        return fake_prob, real_prob, notes
+
     def _classify(self, fake_prob: float, real_prob: float):
         """3-tier classification: REAL / NEEDS REVIEW / FAKE"""
         if fake_prob >= self.review_high:
@@ -124,10 +168,11 @@ class TruthSeekerInference:
             padding=True,
         ).to(self.device)
 
-        outputs   = self.model(**inputs)
-        probs     = torch.softmax(outputs.logits, dim=-1).cpu().numpy()[0]
-        fake_prob = float(probs[0])
-        real_prob = float(probs[1]) if len(probs) > 1 else float(1 - probs[0])
+        outputs       = self.model(**inputs)
+        probs         = torch.softmax(outputs.logits, dim=-1).cpu().numpy()[0]
+        raw_fake_prob = float(probs[0])
+        raw_real_prob = float(probs[1]) if len(probs) > 1 else float(1 - probs[0])
+        fake_prob, real_prob, calibration_notes = self._calibrate_probs(text, raw_fake_prob, raw_real_prob)
 
         label, confidence = self._classify(fake_prob, real_prob)
         latency = (time.time() - t0) * 1000
@@ -137,6 +182,9 @@ class TruthSeekerInference:
             "nlp_confidence": round(confidence * 100),
             "real_prob":      real_prob,
             "fake_prob":      fake_prob,
+            "raw_real_prob":  raw_real_prob,
+            "raw_fake_prob":  raw_fake_prob,
+            "calibration":    calibration_notes,
             "inference_ms":   round(latency, 2),
         }
 

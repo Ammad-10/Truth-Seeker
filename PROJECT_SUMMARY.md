@@ -15,7 +15,7 @@ The main user flow is: sign in, submit news text on the Verify page, receive a c
 ## Main Features
 
 - News text verification through `/api/verify`
-- Credibility scoring from the local ML model and Gemini reasoning
+- Credibility scoring from the local ML model and Groq reasoning
 - Three-level verdict output: `REAL`, `NEEDS REVIEW`, or `FAKE`
 - Topic-aware reasoning for health, politics, finance, science, conspiracy, sports, and general claims
 - Linguistic warning flags for clickbait, excessive caps, emotional punctuation, and conspiracy-style phrasing
@@ -141,7 +141,7 @@ These paths are documented in `LOCAL_DEPLOYMENT_COMMANDS.md`.
 The active `/api/verify` flow uses:
 
 - 50 percent local model credibility score
-- 50 percent Gemini reasoning score
+- 50 percent Groq reasoning score
 - 0 percent external news API score
 - 0 percent Google Fact Check score
 
@@ -155,7 +155,7 @@ Final verdict mapping:
 | `40-75` | `NEEDS REVIEW` |
 | `76-100` | `REAL` |
 
-The response includes the final score, verdict, model score, model fake percentage, Gemini score, Gemini verdict, Gemini reasoning, topic, fact-check placeholder data, GDELT placeholder sources, flags, and timing fields.
+The response includes the final score, verdict, model score, model fake percentage, Groq score, Groq verdict, Groq reasoning, topic, fact-check placeholder data, GDELT placeholder sources, flags, and timing fields.
 
 ## Data Storage
 
@@ -215,7 +215,8 @@ Common backend variables:
 | `MODEL_PATH` | Path to the trained final model or LoRA adapter |
 | `TRUTHSEEKER_BASE_MODEL_PATH` | Local DistilBERT base model path |
 | `TRUTHSEEKER_INVERT_MODEL_PROBS` | Whether to invert model fake/real probabilities |
-| `GEMINI_API_KEY` | Enables Gemini reasoning |
+| `GROQ_API_KEY` | Enables Groq reasoning |
+| `GROQ_MODEL` | Optional Groq model override, defaults to `llama-3.3-70b-versatile` |
 | `GOOGLE_FACT_CHECK_KEY` | Optional Google Fact Check API key, currently disabled in active scoring |
 | `JWT_SECRET` | Secret used for Flask JWT tokens |
 | `DB_PATH` | Optional SQLite database path |
@@ -249,12 +250,12 @@ The backend includes a Dockerfile in `truthseeker/deployment/Dockerfile` and can
 gunicorn -w 4 -b 0.0.0.0:5000 app:app
 ```
 
-The broader README describes training and deployment options for AWS SageMaker, Azure ML, and local training. The currently present model artifact appears to be a SageMaker-trained clean model from April 2026.
+The repository is documented for local deployment and demo use. The included model package contains the trained TruthSeeker LoRA adapter; the larger DistilBERT base model is kept out of Git and can be downloaded or supplied locally.
 
 ## Current Limitations and Future Work
 
 - External fact-check APIs are disabled in the active scoring path.
-- Gemini reasoning requires a valid `GEMINI_API_KEY`.
+- Groq reasoning requires a valid `GROQ_API_KEY`.
 - OCR requires optional Tesseract dependencies.
 - The model is strongest on full article-style news text rather than very short claims.
 - Local SQLite auth and Supabase auth both exist, so production architecture should choose one source of truth.
@@ -268,5 +269,5 @@ The broader README describes training and deployment options for AWS SageMaker, 
 4. Open the Verify page.
 5. Paste full article-style news text.
 6. Run analysis.
-7. Review the score, verdict, topic, model output, and Gemini reasoning.
+7. Review the score, verdict, topic, model output, and Groq reasoning.
 8. Open History and Trends to confirm the result was saved.
