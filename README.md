@@ -14,18 +14,15 @@ This repository is for local deployment and demo use. It does not include cloud 
 - Local deployment commands in `LOCAL_DEPLOYMENT_COMMANDS.md`
 - Project summary in `PROJECT_SUMMARY.md`
 
-## What Is Not Committed
+## Local Model Setup
 
-These files are intentionally ignored:
+The trained TruthSeeker adapter is included in:
 
-- `.env` files and API keys
-- SQLite databases
-- Python virtual environments
-- `node_modules`
-- frontend build output
-- the large local DistilBERT base model under `truthseeker/model_output/base_models/`
+```text
+truthseeker/model_output/sagemaker_clean_2026_04_24/
+```
 
-The trained project adapter is small and is included. The base DistilBERT model is large, so it should be downloaded or placed locally when running the backend.
+The backend uses DistilBERT as the base model. If a local copy is available, set `TRUTHSEEKER_BASE_MODEL_PATH`; otherwise Transformers can download `distilbert-base-uncased` when the API starts.
 
 ## Local Backend
 
