@@ -1,32 +1,61 @@
-# TruthSeeker
+# TruthSeeker — AI Fake News Detection System
 
-TruthSeeker is a local fake-news verification app. It runs a React website, a Flask model API, a trained DistilBERT + LoRA adapter, and a Groq reasoning layer.
+**Stack:** Python · PyTorch · DistilBERT · LoRA · Flask · Docker · AWS SageMaker · Groq LLM · React · Supabase
 
-This repository is for local deployment and demo use. It does not include cloud training instructions.
+End-to-end fake news detection system — every layer designed and deployed independently.
 
-## What Is Included
+---
 
-- React/Vite frontend in `Website/`
-- Flask API in `truthseeker/deployment/`
-- Inference engine in `truthseeker/training/inference.py`
-- Trained LoRA adapter package in `truthseeker/model_output/sagemaker_clean_2026_04_24/`
-- Supabase schema and Edge Function files in `Website/supabase/`
-- Local deployment commands in `LOCAL_DEPLOYMENT_COMMANDS.md`
-- Project summary in `PROJECT_SUMMARY.md`
+## What It Does
 
-## Local Model Setup
+TruthSeeker takes raw news text, runs it through a fine-tuned transformer, synthesises reasoning with a large language model, and returns a credibility verdict with a breakdown of contributing scores.
 
-The trained TruthSeeker adapter is included in:
+- Fine-tuned DistilBERT with LoRA adapters trained on AWS SageMaker
+- Flask REST API with request caching and rate limiting, containerised with Docker
+- React + Vite frontend with protected routes and Supabase authentication
+- Groq LLM integration for real-time topic-aware reasoning
+- Linguistic flag analysis: clickbait, excessive caps, emotional punctuation, conspiracy phrasing
+- Verification history and trend analytics stored in SQLite
 
-```text
-truthseeker/model_output/sagemaker_clean_2026_04_24/
+---
+
+## Architecture
+
+```
+User
+ │
+ ▼
+React / Vite Frontend  (TypeScript · Tailwind · Radix UI · Supabase Auth)
+ │
+ ▼  POST /api/verify
+Flask REST API  (Python · Flask · JWT)
+ ├── TruthSeekerInference  ──►  DistilBERT + LoRA adapter  (PyTorch · PEFT)
+ └── Groq Reasoning Layer  ──►  llama-3.3-70b-versatile
+ │
+ ▼
+SQLite  (users · verifications · live_trends)
 ```
 
-The backend uses DistilBERT as the base model. If a local copy is available, set `TRUTHSEEKER_BASE_MODEL_PATH`; otherwise Transformers can download `distilbert-base-uncased` when the API starts.
+---
 
-## Local Backend
+## Scoring
 
-From the project root:
+| Source | Weight |
+|---|---|
+| Local ML model (DistilBERT + LoRA) | 50% |
+| Groq LLM reasoning | 50% |
+
+| Credibility Score | Verdict |
+|---|---|
+| 0 – 39 | FAKE |
+| 40 – 75 | NEEDS REVIEW |
+| 76 – 100 | REAL |
+
+---
+
+## Quick Start
+
+### Backend
 
 ```bash
 cd truthseeker/deployment
@@ -43,18 +72,7 @@ Health check:
 curl http://localhost:5000/api/health
 ```
 
-Expected response should include:
-
-```json
-{
-  "status": "ok",
-  "model_loaded": true
-}
-```
-
-## Local Frontend
-
-Open a second terminal from the project root:
+### Frontend
 
 ```bash
 cd Website
@@ -62,45 +80,76 @@ npm install
 npm run dev
 ```
 
-Open:
+Open `http://localhost:5173`
 
-```text
-http://localhost:5173
-```
+---
 
 ## Environment
 
-Create or update `truthseeker/deployment/.env`:
+Create `truthseeker/deployment/.env`:
 
 ```env
 MODEL_PATH=../model_output/sagemaker_clean_2026_04_24/extracted/final_model
+TRUTHSEEKER_BASE_MODEL_PATH=../model_output/base_models/distilbert-base-uncased
 TRUTHSEEKER_INVERT_MODEL_PROBS=false
 GROQ_API_KEY=your-groq-api-key
 GROQ_MODEL=llama-3.3-70b-versatile
 GOOGLE_FACT_CHECK_KEY=
 ```
 
-Optional local base-model override:
+If `TRUTHSEEKER_BASE_MODEL_PATH` is not set, the backend falls back to downloading `distilbert-base-uncased` via Hugging Face Transformers.
 
-```env
-TRUTHSEEKER_BASE_MODEL_PATH=../model_output/base_models/distilbert-base-uncased
+---
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | API status, model loading, OCR availability |
+| `POST` | `/api/verify` | Analyse text, return score + verdict + reasoning |
+| `POST` | `/api/register` | Create a local user account |
+| `POST` | `/api/login` | Authenticate and return a JWT |
+| `GET` | `/api/history` | Recent verifications (JWT required) |
+| `GET` | `/api/trends` | Verdict counts from verification history |
+
+---
+
+## Project Structure
+
+```
+.
+├── truthseeker/
+│   ├── deployment/
+│   │   ├── app.py              # Flask API
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   ├── training/
+│   │   └── inference.py        # DistilBERT + LoRA inference engine
+│   └── model_output/
+│       └── sagemaker_clean_2026_04_24/   # Trained LoRA adapter
+└── Website/
+    ├── src/
+    │   ├── pages/              # Verify · Results · History · Trends
+    │   └── lib/modelApi.ts     # API client
+    └── supabase/               # Schema · Edge Functions
 ```
 
-If the base model folder is not present, the backend can fall back to downloading `distilbert-base-uncased` through Transformers.
+---
 
 ## Demo Flow
 
-1. Start the Flask API.
-2. Start the Vite website.
-3. Log in through the website.
-4. Open `Verify`.
-5. Paste full article-style news text.
-6. Click `Analyze`.
-7. Review the credibility score, verdict, model score, Groq reasoning, and history entry.
+1. Start the Flask API (`python app.py`)
+2. Start the Vite frontend (`npm run dev`)
+3. Sign in through the website
+4. Open **Verify**, paste article-style news text, click **Analyze**
+5. Review credibility score, verdict, model score, Groq reasoning, and linguistic flags
+6. Open **History** and **Trends** to see saved results
+
+---
 
 ## Notes
 
-- Groq is used for reasoning synthesis.
-- External fact-check APIs are disabled by default.
-- The model works best with article-style text.
-- Very short claims are calibrated toward review instead of extreme confidence.
+- The model performs best on full article-style text; very short claims skew toward `NEEDS REVIEW`
+- External fact-check APIs (GDELT, Google Fact Check) are wired up but parked at neutral scores
+- OCR image input requires optional Tesseract dependencies
+- Production deployment can use Gunicorn: `gunicorn -w 4 -b 0.0.0.0:5000 app:app`
